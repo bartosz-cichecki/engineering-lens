@@ -12,10 +12,10 @@ Cross-platform engineering workflows for explaining changes, reviewing change re
 
 ## Install in Codex
 
-From this repository root:
+Add the GitHub marketplace and install the plugin; cloning is not required:
 
 ```bash
-codex plugin marketplace add .
+codex plugin marketplace add bartosz-cichecki/engineering-lens
 codex plugin add engineering-lens@engineering-lens-tools
 ```
 
@@ -23,14 +23,13 @@ Start a new Codex session after installation.
 
 ## Install in Claude Code
 
-From this repository root:
+Run these commands in a Claude Code session; cloning is not required:
 
-```bash
-claude plugin marketplace add .
-claude plugin install engineering-lens@engineering-lens-tools
+```text
+/plugin marketplace add bartosz-cichecki/engineering-lens
+/plugin install engineering-lens@engineering-lens-tools
+/reload-plugins
 ```
-
-Restart Claude Code after installation.
 
 ## Invoke explicitly
 
