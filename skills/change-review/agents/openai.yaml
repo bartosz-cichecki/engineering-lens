@@ -1,0 +1,7 @@
+interface:
+  display_name: "Change Review"
+  short_description: "Review a saved change scope for readiness"
+  default_prompt: "Use $engineering-lens:change-review to review the saved change scope."
+
+policy:
+  allow_implicit_invocation: false

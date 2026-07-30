@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "engineering-lens-tools",
+  "description": "Source marketplace for the Engineering Lens workflows.",
+  "owner": {
+    "name": "Bartosz Cichecki"
+  },
+  "plugins": [
+    {
+      "name": "engineering-lens",
+      "displayName": "Engineering Lens",
+      "version": "0.1.0",
+      "description": "Cross-platform engineering workflows for explaining changes, reviewing change readiness, and assessing repositories.",
+      "source": "./",
+      "category": "development",
+      "keywords": [
+        "engineering",
+        "git",
+        "code-review",
+        "repository-assessment"
+      ],
+      "strict": true,
+      "skills": [
+        "./adapters/claude/skills/change-walkthrough",
+        "./adapters/claude/skills/change-review-context",
+        "./adapters/claude/skills/change-review",
+        "./adapters/claude/skills/repo-assessment-context",
+        "./adapters/claude/skills/repo-assessment"
+      ]
+    }
+  ]
+}

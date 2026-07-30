@@ -1,0 +1,35 @@
+{
+  "name": "engineering-lens",
+  "version": "0.1.0",
+  "description": "Cross-platform engineering workflows for explaining changes, reviewing change readiness, and assessing repositories.",
+  "author": {
+    "name": "Bartosz Cichecki",
+    "email": "bartosz.cichecki@gmail.com",
+    "url": "https://github.com/bartosz-cichecki"
+  },
+  "repository": "https://github.com/bartosz-cichecki/engineering-lens",
+  "license": "MIT",
+  "keywords": [
+    "engineering",
+    "git",
+    "code-review",
+    "repository-assessment"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Engineering Lens",
+    "shortDescription": "Guided engineering analysis workflows",
+    "longDescription": "Explain selected changes, review saved change scopes for readiness, and assess repositories against their actual purpose.",
+    "developerName": "Bartosz Cichecki",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Walk me through a selected change.",
+      "Review a saved change scope.",
+      "Assess this repository against its purpose."
+    ]
+  }
+}

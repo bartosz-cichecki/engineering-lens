@@ -1,0 +1,7 @@
+interface:
+  display_name: "Change Walkthrough"
+  short_description: "Explain a frozen change one group at a time"
+  default_prompt: "Use $engineering-lens:change-walkthrough to explain a selected change interactively."
+
+policy:
+  allow_implicit_invocation: false
