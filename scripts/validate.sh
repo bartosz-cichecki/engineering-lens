@@ -208,6 +208,23 @@ if not readme_path.is_file():
     readme = ""
 else:
     readme = readme_path.read_text(encoding="utf-8")
+required_installation_commands = (
+    "codex plugin marketplace add bartosz-cichecki/engineering-lens",
+    "codex plugin add engineering-lens@engineering-lens-tools",
+    "/plugin marketplace add bartosz-cichecki/engineering-lens",
+    "/plugin install engineering-lens@engineering-lens-tools",
+    "/reload-plugins",
+)
+for command in required_installation_commands:
+    if command not in readme:
+        error(f"README.md is missing installation command: {command}")
+for obsolete_command in (
+    "codex plugin marketplace add .",
+    "claude plugin marketplace add .",
+    "claude plugin install engineering-lens@engineering-lens-tools",
+):
+    if obsolete_command in readme:
+        error(f"README.md still uses an obsolete installation command: {obsolete_command}")
 for name in expected:
     codex_invocation = f"$engineering-lens:{name}"
     if codex_invocation not in readme:
