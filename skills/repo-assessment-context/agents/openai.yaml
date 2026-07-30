@@ -1,0 +1,7 @@
+interface:
+  display_name: "Repository Assessment Context"
+  short_description: "Capture context for repository assessment"
+  default_prompt: "Use $engineering-lens:repo-assessment-context to prepare repository assessment context."
+
+policy:
+  allow_implicit_invocation: false

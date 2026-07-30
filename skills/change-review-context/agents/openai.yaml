@@ -1,0 +1,7 @@
+interface:
+  display_name: "Change Review Context"
+  short_description: "Capture scope and intent for a change review"
+  default_prompt: "Use $engineering-lens:change-review-context to prepare an exact change review context."
+
+policy:
+  allow_implicit_invocation: false

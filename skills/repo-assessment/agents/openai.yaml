@@ -1,0 +1,7 @@
+interface:
+  display_name: "Repository Assessment"
+  short_description: "Assess repository fitness with evidence"
+  default_prompt: "Use $engineering-lens:repo-assessment to assess the repository from saved context."
+
+policy:
+  allow_implicit_invocation: false
