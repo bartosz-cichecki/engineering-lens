@@ -175,6 +175,7 @@ for name in expected:
                 "description",
                 "disable-model-invocation",
                 "user-invocable",
+                "argument-hint",
             }
             unknown = frontmatter_keys(
                 frontmatter,
@@ -196,6 +197,15 @@ for name in expected:
         expected_link = f"../../../../skills/{name}/references/workflow.md"
         if expected_link not in text:
             error(f"Claude adapter does not point to the shared workflow: {name}")
+
+        if name == "change-review-context":
+            if not re.search(
+                r'(?m)^argument-hint:\s*"\[--automation <full Task Contract>\]"\s*$',
+                frontmatter,
+            ):
+                error("Claude change-review-context adapter does not advertise its automation input.")
+            if text.count("$ARGUMENTS") != 1:
+                error("Claude change-review-context adapter must pass invocation arguments exactly once.")
 
 if len(skill_names) != len(set(skill_names)):
     error("Skill names must be unique.")
@@ -231,6 +241,71 @@ for name in expected:
         error(f"README.md is missing Codex invocation {codex_invocation}.")
     if f"/engineering-lens:{name}" not in readme:
         error(f"README.md is missing Claude Code invocation /engineering-lens:{name}.")
+
+for automation_example_part in (
+    "/engineering-lens:change-review-context --automation",
+    "cat task-contract.md",
+    "claude -p --permission-mode auto --no-session-persistence",
+):
+    if automation_example_part not in readme:
+        error(
+            "README.md is missing the minimal headless change-review-context "
+            f"example part: {automation_example_part}"
+        )
+
+context_workflow_path = root / "skills" / "change-review-context" / "references" / "workflow.md"
+review_workflow_path = root / "skills" / "change-review" / "references" / "workflow.md"
+if context_workflow_path.is_file() and review_workflow_path.is_file():
+    context_workflow = context_workflow_path.read_text(encoding="utf-8")
+    review_workflow = review_workflow_path.read_text(encoding="utf-8")
+
+    interactive_prompt = """Choose language / Wybierz język:
+
+1. Polski
+2. English"""
+    interactive_requirements = (
+        "In the interactive path, your first user-visible action must be to ask exactly:",
+        interactive_prompt,
+        "Stop and wait. Do not inspect the repository or ask another workflow question first.",
+        "1. Uncommitted changes: staged, unstaged, and relevant untracked files.",
+        "2. Last commit: the exact commit currently at `HEAD`.",
+        "3. Current branch compared with a base branch.",
+        "4. Pull request.",
+        "Ask for exactly one work stage:",
+        "- `WIP`\n- `Pre-commit`\n- `Pre-merge`",
+        "Show included relevant paths and excluded paths with short reasons, and ask for confirmation.",
+    )
+    for requirement in interactive_requirements:
+        if requirement not in context_workflow:
+            error(
+                "Interactive change-review-context behavior lost a required invariant: "
+                f"{requirement.splitlines()[0]}"
+            )
+
+    automation_requirements = (
+        "exact standalone token `--automation`",
+        "Once automation mode is selected, never fall back to the interactive path.",
+        "without asking a question, requesting confirmation, or waiting for user input",
+        "Fix `Scope mode` to `uncommitted` and `Review stage` to `Pre-commit`.",
+        "Classify every non-ignored untracked path",
+        "Always exclude `.engineering-lens/change-review-context.md` from evaluated scope.",
+        "Calculate the shared deterministic uncommitted fingerprint.",
+        "do not create or replace the context file",
+        "use its single format-version-1 schema",
+    )
+    for requirement in automation_requirements:
+        if requirement not in context_workflow:
+            error(
+                "Automation change-review-context path is missing a required invariant: "
+                f"{requirement}"
+            )
+
+    if context_workflow.count("# Change Review Context") != 1:
+        error("Change review context schema must have a single shared definition.")
+    if context_workflow.count("- Format version: 1") != 1:
+        error("Change review context must retain its single format version 1 schema.")
+    if "does not use format version `1`" not in review_workflow:
+        error("Change review no longer requires the shared format version 1 context.")
 
 markdown_files = [
     path for path in distribution_files()
