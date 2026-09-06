@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://engineering-lens.local/automation-result-v1.schema.json",
+  "title": "Engineering Lens automation result v1",
+  "type": "object",
+  "properties": {
+    "format_version": {
+      "const": 1
+    },
+    "operation": {
+      "enum": [
+        "change-review-context",
+        "change-review"
+      ]
+    },
+    "status": {
+      "enum": [
+        "success",
+        "rejected",
+        "contract_error",
+        "technical_error"
+      ]
+    },
+    "reason_code": {
+      "enum": [
+        "CONTEXT_CREATED",
+        "TASK_CONTRACT_INCOMPLETE",
+        "LANGUAGE_UNSUPPORTED",
+        "BOUNDARY_UNRESOLVED",
+        "CONTEXT_INVALID",
+        "CONTEXT_STALE",
+        "REVIEW_COMPLETED",
+        "AUTOMATION_RESULT_INVALID",
+        "CLAUDE_FAILURE"
+      ]
+    },
+    "message": {
+      "enum": [
+        "Review context created.",
+        "Required Task Contract data is missing or ambiguous.",
+        "Task Contract language is unsupported or ambiguous.",
+        "The review boundary cannot be established safely.",
+        "Saved review context is missing or invalid.",
+        "Saved review context no longer matches the review boundary.",
+        "Review completed.",
+        "Automation result is missing, malformed, or inconsistent.",
+        "Claude or its CLI failed."
+      ]
+    },
+    "task_contract": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "goal_reason": {
+              "enum": [
+                "derived",
+                "missing",
+                "ambiguous",
+                "not_evaluated"
+              ]
+            },
+            "intentional_exclusions": {
+              "enum": [
+                "derived",
+                "missing",
+                "ambiguous",
+                "not_evaluated"
+              ]
+            },
+            "completion_criteria": {
+              "enum": [
+                "derived",
+                "missing",
+                "ambiguous",
+                "not_evaluated"
+              ]
+            },
+            "risks_external_constraints": {
+              "enum": [
+                "derived",
+                "missing",
+                "ambiguous",
+                "not_evaluated"
+              ]
+            }
+          },
+          "required": [
+            "goal_reason",
+            "intentional_exclusions",
+            "completion_criteria",
+            "risks_external_constraints"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "verdict": {
+      "enum": [
+        null,
+        "READY",
+        "READY AFTER FIXES",
+        "NOT READY"
+      ]
+    },
+    "verdict_rationale": {
+      "enum": [
+        null,
+        "No blocking finding exists for the saved stage.",
+        "Bounded fixes are required before advancement.",
+        "Goal conflicts, redesign, or essential evidence prevent advancement."
+      ]
+    }
+  },
+  "required": [
+    "format_version",
+    "operation",
+    "status",
+    "reason_code",
+    "message",
+    "task_contract",
+    "verdict",
+    "verdict_rationale"
+  ],
+  "additionalProperties": false
+}
