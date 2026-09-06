@@ -12,6 +12,12 @@ from urllib.parse import quote, quote_plus
 
 ROOT = Path(__file__).resolve().parent.parent
 SCHEMA = json.loads((ROOT / 'references/automation-result-v1.schema.json').read_text())
+OUTPUT_SCHEMA = {
+    'type': 'object',
+    'properties': {'automation_result': SCHEMA, 'human_report': {'type': 'string', 'minLength': 1}},
+    'required': ['automation_result', 'human_report'],
+    'additionalProperties': False,
+}
 FIELDS = tuple(SCHEMA['properties']['task_contract']['anyOf'][1]['required'])
 MESSAGES = dict(zip(SCHEMA['properties']['reason_code']['enum'], SCHEMA['properties']['message']['enum']))
 RATIONALES = dict(zip(SCHEMA['properties']['verdict']['enum'], SCHEMA['properties']['verdict_rationale']['enum']))
@@ -111,7 +117,7 @@ def decode_cli(stdout, returncode, operation):
     if envelope.get('type') != 'result' or envelope.get('subtype') != 'success' or envelope.get('is_error') is not False:
         return contract_error, None
     try:
-        payload = strict_json(envelope['result'])
+        payload = envelope['structured_output']
         if not isinstance(payload, dict) or set(payload) != {'automation_result', 'human_report'}:
             raise ValueError('Invalid payload')
         if not isinstance(payload['human_report'], str) or not payload['human_report'].strip():
@@ -284,16 +290,17 @@ def run(operation, contract, timeout, *, options=None, diagnostics=None):
             return failure(operation, 'contract_error', 'AUTOMATION_RESULT_INVALID'), 'Context path is a symlink.'
         before = context_snapshot(path) if operation == 'change-review-context' else None
         instructions = (ROOT / 'references/automation-result.md').read_text()
-        instructions += '\nAUTOMATION TRANSPORT ACTIVE. Final response must be exactly one JSON object '
-        instructions += 'with automation_result and human_report, without fences or surrounding prose. '
-        instructions += 'Use this schema for automation_result:\n' + json.dumps(SCHEMA)
+        instructions += '\nAUTOMATION TRANSPORT ACTIVE. Submit automation_result and human_report '
+        instructions += 'through the CLI schema-constrained structured output. '
+        instructions += 'The text result is diagnostic only and cannot supply the automation result.'
         prompt = '/engineering-lens:' + operation
         if operation == 'change-review-context':
             prompt += ' --automation\n\n' + contract
         completed = subprocess.run(
             ['claude', '-p', '--plugin-dir', str(ROOT),
              *(options if options is not None else ['--permission-mode', 'auto']),
-             '--no-session-persistence', '--output-format', 'json', '--append-system-prompt', instructions],
+             '--no-session-persistence', '--output-format', 'json',
+             '--json-schema', json.dumps(OUTPUT_SCHEMA), '--append-system-prompt', instructions],
             input=prompt, text=True, encoding='utf-8', errors='replace', capture_output=True, timeout=timeout,
         )
         result, report = decode_cli(completed.stdout, completed.returncode, operation)

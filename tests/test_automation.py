@@ -30,7 +30,8 @@ def review(verdict='READY'):
 
 def envelope(value, report='Human report with arbitrary formatting'):
     return json.dumps(dict(type='result', subtype='success', is_error=False,
-                          result=json.dumps(dict(automation_result=value, human_report=report))))
+                          result='Additional CLI commentary, not JSON.',
+                          structured_output=dict(automation_result=value, human_report=report)))
 
 
 class ResultTests(unittest.TestCase):
@@ -99,19 +100,72 @@ class ResultTests(unittest.TestCase):
             value.update(changes)
             self.assertEqual(a.decode_cli(envelope(value), 0, 'change-review')[0]['status'], 'contract_error')
 
-    def test_duplicate_inner_key_and_nonfinite_number(self):
-        for raw in ('{"automation_result": {}, "automation_result": {}, "human_report": "x"}', 'NaN'):
-            outer = json.dumps(dict(type='result', subtype='success', is_error=False, result=raw))
-            self.assertEqual(a.decode_cli(outer, 0, 'change-review')[0]['status'], 'contract_error')
+    def test_structured_output_is_the_only_source(self):
+        for value in (context(), review(),
+                      context(dict(zip(a.FIELDS, ['derived', 'missing', 'ambiguous', 'derived'])),
+                              'TASK_CONTRACT_INCOMPLETE'),
+                      a.failure('change-review', 'rejected', 'CONTEXT_STALE')):
+            operation = value['operation']
+            payload = dict(automation_result=value, human_report='Full human report')
+            for text in ('Extra commentary', json.dumps(payload),
+                         '```json\n' + json.dumps(payload) + '\n```',
+                         json.dumps(dict(automation_result=review('NOT READY'), human_report='Misleading'))):
+                outer = json.loads(envelope(value, payload['human_report']))
+                outer['result'] = text
+                with self.subTest(operation=operation, status=value['status'], text=text):
+                    self.assertEqual(a.decode_cli(json.dumps(outer), 0, operation),
+                                     (value, payload['human_report']))
+                    for invalid in (None, [], 'not JSON', json.dumps(payload), {},
+                                    dict(payload, extra=True), dict(payload, human_report='  '),
+                                    dict(payload, human_report=42), {'automation_result': value},
+                                    {'human_report': 'Missing result'},
+                                    dict(payload, automation_result=dict(value, operation='wrong'))):
+                        outer['structured_output'] = invalid
+                        self.assertEqual(a.decode_cli(json.dumps(outer), 0, operation),
+                                         (a.failure(operation, 'contract_error', 'AUTOMATION_RESULT_INVALID'), None))
+                    del outer['structured_output']
+                    self.assertEqual(a.decode_cli(json.dumps(outer), 0, operation)[0]['status'], 'contract_error')
+            outer = json.loads(envelope(value))
+            del outer['result']
+            self.assertEqual(a.decode_cli(json.dumps(outer), 0, operation)[0], value)
+
+    def test_duplicate_keys_and_nonfinite_number(self):
+        for value in (context(), review()):
+            raw = envelope(value)
+            for key, encoded in (('type', '"result"'), ('structured_output', '{}'),
+                                 ('automation_result', '{}'), ('human_report', '"duplicate"'),
+                                 ('format_version', '1'), ('verdict', 'null')):
+                duplicate = raw.replace('"' + key + '":', '"' + key + '": ' + encoded + ', "' + key + '":', 1)
+                with self.subTest(operation=value['operation'], key=key):
+                    self.assertEqual(a.decode_cli(duplicate, 0, value['operation'])[0]['status'], 'contract_error')
+            if value['task_contract']:
+                duplicate = raw.replace('"goal_reason":', '"goal_reason": "derived", "goal_reason":', 1)
+                self.assertEqual(a.decode_cli(duplicate, 0, value['operation'])[0]['status'], 'contract_error')
+            self.assertEqual(a.decode_cli(raw.replace('"format_version": 1', '"format_version": NaN'),
+                                          0, value['operation'])[0]['status'], 'contract_error')
+
+    def test_invalid_envelope_with_valid_structured_output(self):
+        for value in (context(), review()):
+            for changes in ({'type': 'assistant'}, {'subtype': 'unknown'},
+                            {'is_error': 0}, {'is_error': None}):
+                outer = json.loads(envelope(value))
+                outer.update(changes)
+                with self.subTest(operation=value['operation'], changes=changes):
+                    self.assertEqual(a.decode_cli(json.dumps(outer), 0, value['operation']),
+                                     (a.failure(value['operation'], 'contract_error', 'AUTOMATION_RESULT_INVALID'), None))
 
     def test_technical_failure_and_native_retry_exhaustion(self):
-        for raw, code in (('secret stderr substitute', 1), (envelope(review()), 1),
-                          (json.dumps(dict(type='result', subtype='error_during_execution', is_error=True)), 0)):
-            result, report = a.decode_cli(raw, code, 'change-review')
-            self.assertEqual(result['reason_code'], 'CLAUDE_FAILURE')
-            self.assertIsNone(report)
-        raw = json.dumps(dict(type='result', subtype='error_max_structured_output_retries', is_error=True))
-        self.assertEqual(a.decode_cli(raw, 1, 'change-review')[0]['status'], 'contract_error')
+        for value in (context(), review()):
+            for raw, code in (('secret stderr substitute', 1), (envelope(value), 1),
+                              (json.dumps(dict(type='result', subtype='error_during_execution', is_error=True)), 0)):
+                result, report = a.decode_cli(raw, code, value['operation'])
+                self.assertEqual(result['reason_code'], 'CLAUDE_FAILURE')
+                self.assertIsNone(report)
+            outer = json.loads(envelope(value))
+            outer.update(subtype='error_max_structured_output_retries', is_error=True)
+            for code in (0, 1):
+                self.assertEqual(a.decode_cli(json.dumps(outer), code, value['operation']),
+                                 (a.failure(value['operation'], 'contract_error', 'AUTOMATION_RESULT_INVALID'), None))
 
     def test_generated_failures_obey_schema(self):
         for operation in ('change-review', 'change-review-context'):
@@ -172,7 +226,10 @@ sys.exit(int(os.environ.get('FAKE_EXIT', '0')))
             self.assertEqual(args[args.index('--permission-mode') + 1], 'auto')
             self.assertNotIn('--model', args)
             self.assertNotIn('--effort', args)
-            self.assertNotIn('--json-schema', args)
+            self.assertEqual(json.loads(args[args.index('--json-schema') + 1]), a.OUTPUT_SCHEMA)
+            self.assertEqual(a.OUTPUT_SCHEMA['properties']['automation_result'], a.SCHEMA)
+            self.assertEqual(a.OUTPUT_SCHEMA['required'], ['automation_result', 'human_report'])
+            self.assertIs(a.OUTPUT_SCHEMA['additionalProperties'], False)
             self.assertIn('--output-format', args)
             self.assertEqual((directory / 'input').read_text(), '/engineering-lens:change-review')
 
@@ -189,7 +246,7 @@ custom = os.environ['AGENTFLOW_INPUT']
 settings = json.loads(pathlib.Path(sys.argv[sys.argv.index('--settings') + 1]).read_text())
 (p / 'received').write_text('yes' if secret and custom else 'no')
 payload = {'automation_result': {}, 'human_report': 'Detailed review diagnosis: ' + secret + ' ' + custom}
-sys.stdout.write(json.dumps({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': json.dumps(payload)}))
+sys.stdout.write(json.dumps({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'CLI commentary ' + secret, 'structured_output': payload}))
 sys.stderr.write('CLI connection diagnosis: ' + secret + ' ' + custom + ' ' + settings['env']['ANTHROPIC_AUTH_TOKEN'])
 sys.exit(int(os.environ['FAKE_EXIT']))
 ''')
@@ -317,6 +374,8 @@ sys.exit(int(os.environ['FAKE_EXIT']))
 
             def save(*args, **kwargs):
                 self.assertIn('--automation\n\nfull task contract', kwargs['input'])
+                argv = args[0]
+                self.assertEqual(json.loads(argv[argv.index('--json-schema') + 1]), a.OUTPUT_SCHEMA)
                 path.write_text(fixture)
                 return subprocess.CompletedProcess([], 0, envelope(context()), '')
 
