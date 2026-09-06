@@ -55,7 +55,7 @@ Claude Code:
 
 ## Prepare review context non-interactively
 
-An orchestrator can pass a complete Task Contract to Claude Code after the `--automation` selector. This mode is fixed to uncommitted scope and the `Pre-commit` stage, asks no questions, and writes the same format-version-1 context consumed by the existing `change-review` skill:
+For direct skill use, a caller can pass a complete Task Contract to Claude Code after the `--automation` selector. This mode is fixed to uncommitted scope and the `Pre-commit` stage, asks no questions, and writes the same format-version-1 context consumed by the existing `change-review` skill:
 
 ```bash
 {
@@ -65,6 +65,19 @@ An orchestrator can pass a complete Task Contract to Claude Code after the `--au
 ```
 
 The Task Contract must state the goal and reason, intentional exclusions, observable completion criteria, and risks or external constraints. Its unambiguous Polish or English prose selects the saved language. If any required value or untracked-file classification is unsafe to derive, the command reports an error and leaves any existing `.engineering-lens/change-review-context.md` unchanged.
+
+## Validated automation for orchestrators
+
+Use the runner from this plugin checkout (set `ENGINEERING_LENS_ROOT` to its absolute location), with the target repository as the working directory:
+
+```bash
+python3 "$ENGINEERING_LENS_ROOT/scripts/automation.py" change-review-context --automation < task-contract.md > /tmp/context-result.json
+python3 "$ENGINEERING_LENS_ROOT/scripts/automation.py" change-review > /tmp/review-result.json
+```
+
+Keep result files outside the evaluated worktree so they do not change its fingerprint. Run review only after context exit 0. Stdout is exactly one validated versioned JSON object; stderr retains the human report. Exit codes are 0 (completed), 2 (semantic rejection), 3 (invalid automation result), and 4 (Claude/CLI failure). A completed review can have any of the three verdicts, so read `verdict` rather than assuming exit 0 means readiness. The runner does not retry or use another LLM to interpret/repair output.
+
+See the [automation result contract](references/automation-result.md) for fields, reason codes, Task Contract element states, secret exclusion, the Claude CLI capability decision, and failure handling. The direct invocation above alone is not the validated orchestrator interface.
 
 ## Validate locally
 

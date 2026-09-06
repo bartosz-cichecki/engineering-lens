@@ -41,7 +41,9 @@ def distribution_files():
         root / ".github" / "workflows" / "validate.yml",
     }
     for pattern in (
-        "references/*.md",
+        "references/*",
+        "scripts/*.py",
+        "tests/*.py",
         "skills/**/*",
         "adapters/claude/skills/**/*",
     ):
@@ -397,6 +399,8 @@ if errors:
 
 print("PASS: repository structure, manifests, skills, references, state paths, and invocation policies are valid.")
 PY
+
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s "$REPO_ROOT/tests" -v
 
 if command -v claude >/dev/null 2>&1; then
   if claude plugin validate --help >/dev/null 2>&1; then
