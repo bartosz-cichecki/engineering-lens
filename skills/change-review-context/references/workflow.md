@@ -77,16 +77,17 @@ Do all of the following without asking a question, requesting confirmation, or w
 
 1. Remove only the leading `--automation` selector from the invocation input and treat the entire remainder as the Task Contract (empty input means all required elements are `missing`).
 2. Read the [shared operating rules](../../../references/operating-rules.md) and [shared Git boundary rules](../../../references/git-boundaries.md) completely.
-3. Validate the Task Contract before inspecting the repository. It must make all of these facts explicit and mutually consistent:
+3. Validate the Task Contract before inspecting the repository. It must provide enough explicit, mutually consistent information to establish:
    - the intended outcome and why it is needed;
-   - intentional exclusions, or an explicit declaration that there are none;
-   - observable completion criteria;
-   - risks and external constraints, or an explicit declaration that there are none.
+   - the scope boundary, through intentional exclusions, an explicit declaration that there are none, or a clearly bounded scope;
+   - observable completion criteria.
+
+   Risks and external constraints are optional. Their omission alone must not cause `TASK_CONTRACT_INCOMPLETE` or require a synthetic `Risks: none` declaration. Read and preserve them wherever explicitly supplied, even outside a dedicated section. Reject unclear or contradictory supplied constraints; still reject missing or ambiguous goal/reason, scope boundary, or completion criteria. No particular headings are required.
 4. Determine `Language` from the Task Contract's unambiguous natural-language prose: `Polish` for Polish and `English` for English. Technical identifiers and quoted repository content do not decide the language. Any other, mixed, or unclear language is unsafe.
 5. Fix `Scope mode` to `uncommitted` and `Review stage` to `Pre-commit`. Do not accept overrides from the Task Contract.
 6. Apply the shared uncommitted Git boundary rules with read-only tools to freeze the boundary and record the canonical repository root.
 7. Inspect only the frozen change summary, path sets, and untracked content needed to apply the shared relevant-untracked classification rules against the Task Contract. Classify every non-ignored untracked path, record a short contract-based reason for each exclusion, and always exclude `.engineering-lens/change-review-context.md` from evaluated scope. Do not ask for confirmation.
-8. Derive faithful, concise values for `Goal`, `Intentionally excluded`, `Completion criteria`, and `Risks and external constraints` from the Task Contract. Preserve explicit constraints and do not invent intent, exclusions, criteria, or risks from the implementation diff.
+8. Derive faithful, concise values for `Goal`, `Intentionally excluded`, `Completion criteria`, and `Risks and external constraints` from the Task Contract. When the boundary is expressed as a clearly bounded scope, describe that boundary in `Intentionally excluded`. If risks and external constraints are omitted, record `None declared` (or its Polish equivalent) in that context section and keep their machine state `missing`; this does not assert that no risks exist. Preserve explicit constraints and do not invent intent, exclusions, criteria, or risks from the implementation diff.
 9. Calculate the shared deterministic uncommitted fingerprint. Then continue at section 5 and use its single format-version-1 schema.
 
 If any required fact, language choice, Git boundary, path classification, derived context value, or fingerprint cannot be established safely and unambiguously, emit the matching `rejected` automation result plus a concise error in the Task Contract's language when that language is clear, otherwise in English. Do not ask a question, do not wait, do not switch to the interactive path, and do not create or replace the context file.
@@ -150,7 +151,7 @@ Create `.engineering-lens/` if needed and create or replace only `.engineering-l
 
 For committed modes, keep the path subsections but use `None`; the consuming review reconstructs paths from the frozen commits. Use full 40-character SHAs.
 
-After writing, tell the user that the context is ready and that the explicitly invoked `change-review` skill will use its saved language, stage, intent, and exact scope. In automation mode, emit `success` / `CONTEXT_CREATED` with all four Task Contract states `derived`, retain a concise human completion message, and do not ask a follow-up question. Follow the automation result contract for transport formatting.
+After writing, tell the user that the context is ready and that the explicitly invoked `change-review` skill will use its saved language, stage, intent, and exact scope. In automation mode, emit `success` / `CONTEXT_CREATED` with `goal_reason`, `intentional_exclusions`, and `completion_criteria` set to `derived`, and `risks_external_constraints` set to `derived` when explicit or `missing` when omitted. Retain a concise human completion message and do not ask a follow-up question. Follow the automation result contract for transport formatting.
 
 ## Boundaries
 

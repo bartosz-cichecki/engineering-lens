@@ -45,13 +45,47 @@ class ResultTests(unittest.TestCase):
         self.assertEqual(a.decode_cli(envelope(value), 0, value['operation'])[0], value)
 
     def test_each_required_element_missing_or_ambiguous(self):
-        for field in a.FIELDS:
-            for state in ('missing', 'ambiguous'):
-                with self.subTest(field=field, state=state):
-                    states = dict.fromkeys(a.FIELDS, 'derived')
-                    states[field] = state
-                    value = context(states, 'TASK_CONTRACT_INCOMPLETE')
-                    self.assertEqual(a.decode_cli(envelope(value), 0, value['operation'])[0], value)
+        for risks in ('derived', 'missing'):
+            for field in ('goal_reason', 'intentional_exclusions', 'completion_criteria'):
+                for state in ('missing', 'ambiguous'):
+                    with self.subTest(field=field, state=state, risks=risks):
+                        states = dict.fromkeys(a.FIELDS, 'derived')
+                        states.update(risks_external_constraints=risks)
+                        states[field] = state
+                        value = context(states, 'TASK_CONTRACT_INCOMPLETE')
+                        self.assertEqual(a.decode_cli(envelope(value), 0, value['operation'])[0], value)
+                        for reason in ('CONTEXT_CREATED', 'LANGUAGE_UNSUPPORTED', 'BOUNDARY_UNRESOLVED'):
+                            invalid = context(states, reason)
+                            self.assertEqual(a.decode_cli(envelope(invalid), 0, invalid['operation'])[0]['status'],
+                                             'contract_error')
+
+    def test_optional_risks_missing_does_not_make_contract_incomplete(self):
+        states = dict.fromkeys(a.FIELDS, 'derived')
+        states['risks_external_constraints'] = 'missing'
+        for reason in ('CONTEXT_CREATED', 'LANGUAGE_UNSUPPORTED', 'BOUNDARY_UNRESOLVED'):
+            with self.subTest(reason=reason):
+                value = context(states, reason)
+                self.assertEqual(a.decode_cli(envelope(value), 0, value['operation'])[0], value)
+        invalid = context(states, 'TASK_CONTRACT_INCOMPLETE')
+        self.assertEqual(a.decode_cli(envelope(invalid), 0, invalid['operation'])[0]['status'], 'contract_error')
+
+    def test_explicit_ambiguous_risks_still_reject(self):
+        states = dict.fromkeys(a.FIELDS, 'derived')
+        states['risks_external_constraints'] = 'ambiguous'
+        value = context(states, 'TASK_CONTRACT_INCOMPLETE')
+        self.assertEqual(a.decode_cli(envelope(value), 0, value['operation'])[0], value)
+        for reason in ('CONTEXT_CREATED', 'LANGUAGE_UNSUPPORTED', 'BOUNDARY_UNRESOLVED'):
+            invalid = context(states, reason)
+            self.assertEqual(a.decode_cli(envelope(invalid), 0, invalid['operation'])[0]['status'], 'contract_error')
+
+    def test_optional_risks_still_require_an_assessed_machine_field(self):
+        for state in (None, 'not_evaluated'):
+            value = context()
+            if state is None:
+                del value['task_contract']['risks_external_constraints']
+            else:
+                value['task_contract']['risks_external_constraints'] = state
+            self.assertEqual(a.decode_cli(envelope(value), 0, value['operation'])[0]['status'], 'contract_error')
 
     def test_empty_contract_and_language_rejection(self):
         for value in (context(dict.fromkeys(a.FIELDS, 'missing'), 'TASK_CONTRACT_INCOMPLETE'),
@@ -365,25 +399,43 @@ sys.exit(int(os.environ['FAKE_EXIT']))
                 '<algorithm or Not applicable>': 'sha256; ordered baseline, staged, unstaged, untracked',
                 '<value or Not applicable>': 'a' * 64, '<path or None>': 'example.py',
                 '<path — reason or None>': 'None', '<what should change and why>': 'Add validation to reject invalid results.',
-                '<explicit exclusions or None declared>': 'None declared', '<observable criterion>': 'Invalid results fail.',
-                '<risk or constraint, or None declared>': 'None declared',
+                '<observable criterion>': 'Invalid results fail and valid results are accepted.',
             }
             for old, new in replacements.items():
                 fixture = fixture.replace(old, new)
             fixture = fixture.replace('- Baseline commit: Not applicable', '- Baseline commit: ' + 'b' * 40)
 
             def save(*args, **kwargs):
-                self.assertIn('--automation\n\nfull task contract', kwargs['input'])
+                self.assertEqual(kwargs['input'], '/engineering-lens:change-review-context --automation\n\n' + contract)
                 argv = args[0]
                 self.assertEqual(json.loads(argv[argv.index('--json-schema') + 1]), a.OUTPUT_SCHEMA)
-                path.write_text(fixture)
-                return subprocess.CompletedProcess([], 0, envelope(context()), '')
+                content = fixture.replace('<risk or constraint, or None declared>', saved_risks)
+                content = content.replace('<explicit exclusions or None declared>', boundary.partition(': ')[2].strip())
+                path.write_text(content)
+                return subprocess.CompletedProcess([], 0, envelope(expected), '')
 
-            with patch.object(a.subprocess, 'run', side_effect=save) as call:
-                result, report = a.run('change-review-context', 'full task contract', 1)
-                self.assertEqual(result, context())
-                self.assertIsNotNone(report)
-                self.assertEqual(call.call_count, 1)
+            # Model assessment is stubbed; exercise the runner with realistic input
+            # and the corresponding structured result and saved context.
+            goal = 'Goal / reason: Add validation to reject invalid automation results.\n'
+            criteria = 'Completion criteria: Invalid results fail and valid results are accepted.\n'
+            explicit_risks = 'Existing AgentFlow consumers require result schema v1 compatibility.'
+            for boundary, constraints, saved_risks, risk_state in (
+                ('Intentional exclusions: No changes to review verdict policy.\n', '', 'None declared', 'missing'),
+                ('Scope: Only automation result validation and its regression tests.\n', '', 'None declared', 'missing'),
+                ('Scope: Only automation result validation and its regression tests.\n',
+                 explicit_risks, explicit_risks, 'derived'),
+            ):
+                contract = goal + boundary + criteria + constraints
+                states = dict.fromkeys(a.FIELDS, 'derived')
+                states['risks_external_constraints'] = risk_state
+                expected = context(states)
+                with self.subTest(contract=contract), patch.object(a.subprocess, 'run', side_effect=save) as call:
+                    result, report = a.run('change-review-context', contract, 1)
+                    self.assertEqual(result, expected)
+                    self.assertEqual(result['reason_code'], 'CONTEXT_CREATED')
+                    self.assertIsNotNone(report)
+                    self.assertEqual(call.call_count, 1)
+                    self.assertIn('## Risks and external constraints\n\n- ' + saved_risks, path.read_text())
             before = path.read_bytes()
             rejected = context(dict.fromkeys(a.FIELDS, 'missing'), 'TASK_CONTRACT_INCOMPLETE')
             with patch.object(a.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, envelope(rejected), '')):

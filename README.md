@@ -64,7 +64,7 @@ For direct skill use, a caller can pass a complete Task Contract to Claude Code 
 } | claude -p --permission-mode auto --no-session-persistence
 ```
 
-The Task Contract must state the goal and reason, intentional exclusions, observable completion criteria, and risks or external constraints. Its unambiguous Polish or English prose selects the saved language. If any required value or untracked-file classification is unsafe to derive, the command reports an error and leaves any existing `.engineering-lens/change-review-context.md` unchanged.
+The Task Contract must establish the goal and reason, a scope boundary (intentional exclusions, an explicit declaration of none, or a clearly bounded scope), and observable completion criteria. Risks and external constraints are optional; omitting them needs no `Risks: none` declaration and does not cause `TASK_CONTRACT_INCOMPLETE`. Explicit risks and constraints are preserved, while unclear or contradictory supplied constraints still cause rejection. Its unambiguous Polish or English prose selects the saved language. If any required value or untracked-file classification is unsafe to derive, the command reports an error and leaves any existing `.engineering-lens/change-review-context.md` unchanged.
 
 ## Validated automation for orchestrators
 
