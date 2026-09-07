@@ -88,7 +88,8 @@ def validate_result(value, operation, from_model=False):
             raise ValueError('Unexpected error assessment')
         if status in ('success', 'rejected') and 'not_evaluated' in states.values():
             raise ValueError('Incomplete assessment')
-        incomplete = any(state in ('missing', 'ambiguous') for state in states.values())
+        incomplete = any(state == 'ambiguous' or (state == 'missing' and field != 'risks_external_constraints')
+                         for field, state in states.items())
         if status in ('success', 'rejected') and incomplete != (reason == 'TASK_CONTRACT_INCOMPLETE'):
             raise ValueError('Task Contract inconsistency')
     elif states is not None:
