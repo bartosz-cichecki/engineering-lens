@@ -291,9 +291,9 @@ if context_workflow_path.is_file() and review_workflow_path.is_file():
         "Fix `Scope mode` to `uncommitted` and `Review stage` to `Pre-commit`.",
         "Classify every non-ignored untracked path",
         "Always exclude `.engineering-lens/change-review-context.md` from evaluated scope.",
-        "Calculate the shared deterministic uncommitted fingerprint.",
+        "the helper computes and saves the snapshot with the contract.",
         "do not create or replace the context file",
-        "use its single format-version-1 schema",
+        "existing format-version-1 context",
     )
     for requirement in automation_requirements:
         if requirement not in context_workflow:
@@ -302,10 +302,6 @@ if context_workflow_path.is_file() and review_workflow_path.is_file():
                 f"{requirement}"
             )
 
-    if context_workflow.count("# Change Review Context") != 1:
-        error("Change review context schema must have a single shared definition.")
-    if context_workflow.count("- Format version: 1") != 1:
-        error("Change review context must retain its single format version 1 schema.")
     if "does not use format version `1`" not in review_workflow:
         error("Change review no longer requires the shared format version 1 context.")
 

@@ -5,7 +5,7 @@ Use these rules whenever a workflow selects, saves, or reconstructs Git scope.
 ## Resolve safely
 
 1. Verify the selected directory is inside a Git worktree and record its canonical repository root.
-2. Resolve each commit boundary locally as a commit object and retain its full 40-character SHA. Preserve the user's entered ref only as context.
+2. Resolve each commit boundary locally as a commit object and retain its full object-format SHA (40 characters for SHA-1, 64 for SHA-256). Preserve the user's entered ref only as context.
 3. Use frozen SHAs after resolution, never moving aliases such as `HEAD` or branch names.
 4. Record merge bases, parents, empty-tree markers, path filters, history modes, and included untracked paths required to reproduce the scope.
 5. If a ref is missing, ambiguous, not a commit, or locally unavailable, stop. Never fetch, guess, substitute, or broaden.
@@ -21,16 +21,9 @@ When `HEAD` exists, freeze its full SHA as the baseline. In an unborn repository
 
 Include an untracked file only when it contributes to the declared goal, selected behavior, tests, configuration, documentation, or delivery story. Explicitly exclude the active workflow's own `.engineering-lens/` state file. Record included and excluded untracked paths with reasons when the workflow contract requires it.
 
-Freeze uncommitted content with a deterministic cryptographic fingerprint covering:
+For `change-review-context` and `change-review`, use the [review snapshot helper](review-snapshot.md) for creation and verification. It owns the algorithm and serialization; never choose, describe into existence, or reimplement a fingerprint in model-generated commands. Preserve the saved untracked classification; inventory drift requires fresh context.
 
-- the full baseline SHA or empty-tree marker;
-- the staged binary-safe full-index diff content;
-- the unstaged binary-safe full-index diff content;
-- the ordered included-untracked path list;
-- a content hash for every included untracked file;
-- the hashing algorithm and deterministic combination order.
-
-A status summary is not a fingerprint. Recompute the fingerprint with the same rules when a consuming workflow starts and whenever its contract requires a drift check. If it differs, stop and require fresh context or a restarted analysis; never absorb drift silently.
+Other workflows retain their existing snapshot contracts: freeze baseline, staged and unstaged content, and ordered relevant untracked paths and contents with a deterministic cryptographic fingerprint. A status summary is insufficient. Recompute under the same rules for drift checks and stop on mismatch.
 
 ### Last or specific commit
 

@@ -45,18 +45,11 @@ Ask for exactly one work stage:
 
 ## 3. Resolve the exact boundary
 
-Apply the shared Git boundary rules with read-only tools. Record the canonical repository root.
-
-- `uncommitted`: freeze the current full `HEAD` SHA or empty-tree marker. Defer final relevant-untracked selection and fingerprinting until the goal is known.
-- `last-commit`: freeze `HEAD` as target and its selected parent or empty tree as baseline. If it is a merge, ask which parent defines the review.
-- `branch`: freeze the entered base ref, resolved base SHA, merge-base SHA, and current `HEAD` target SHA.
-- `pull-request`: use an already configured read-only host tool if available; otherwise ask for locally resolvable base and head refs. Freeze the identifier, base ref when known, resolved base SHA, merge base, and target SHA.
-
-If any boundary is unavailable locally, stop and request a resolvable value. Do not review code while resolving it.
+Use the [review snapshot helper](../../../references/review-snapshot.md) to inspect the repository. Obtain the selected mode's required locally resolvable refs; for a merge commit ask which parent defines the review. The helper resolves and freezes the final boundary when saving. If a required boundary is unavailable, stop and request a resolvable value.
 
 ## 4. Collect intent
 
-Inspect only the frozen change summary and path list needed to ask short, specific questions. Collect:
+Inspect only change summaries and path lists needed to ask short, specific questions. Read untracked content only when necessary to classify a path. Do not analyze implementation correctness or infer risks from the diff. Collect:
 
 - the outcome and reason for the change;
 - intentional exclusions;
@@ -65,7 +58,7 @@ Inspect only the frozen change summary and path list needed to ask short, specif
 
 Ask in small batches and confirm ambiguous answers. Describe intent as outcomes, not a repetition of diff mechanics.
 
-For uncommitted scope, now classify untracked paths against the declared goal. Show included relevant paths and excluded paths with short reasons, and ask for confirmation. Always exclude `.engineering-lens/change-review-context.md` from evaluated scope. After confirmation, calculate the required deterministic fingerprint across baseline, staged content, unstaged content, and included relevant untracked content.
+For uncommitted scope, now classify untracked paths against the declared goal. Show included relevant paths and excluded paths with short reasons, and ask for confirmation. Always exclude `.engineering-lens/change-review-context.md` from evaluated scope. Pass the confirmed classification and declared intent to the helper when saving. Risks must come from the user; if none were supplied, record `None declared` in the selected language.
 
 ## Automation path
 
@@ -85,71 +78,23 @@ Do all of the following without asking a question, requesting confirmation, or w
    Risks and external constraints are optional. Their omission alone must not cause `TASK_CONTRACT_INCOMPLETE` or require a synthetic `Risks: none` declaration. Read and preserve them wherever explicitly supplied, even outside a dedicated section. Reject unclear or contradictory supplied constraints; still reject missing or ambiguous goal/reason, scope boundary, or completion criteria. No particular headings are required.
 4. Determine `Language` from the Task Contract's unambiguous natural-language prose: `Polish` for Polish and `English` for English. Technical identifiers and quoted repository content do not decide the language. Any other, mixed, or unclear language is unsafe.
 5. Fix `Scope mode` to `uncommitted` and `Review stage` to `Pre-commit`. Do not accept overrides from the Task Contract.
-6. Apply the shared uncommitted Git boundary rules with read-only tools to freeze the boundary and record the canonical repository root.
-7. Inspect only the frozen change summary, path sets, and untracked content needed to apply the shared relevant-untracked classification rules against the Task Contract. Classify every non-ignored untracked path, record a short contract-based reason for each exclusion, and always exclude `.engineering-lens/change-review-context.md` from evaluated scope. Do not ask for confirmation.
+6. Use the [review snapshot helper](../../../references/review-snapshot.md) to inspect the canonical repository root and untracked inventory.
+7. Inspect only change summaries, path sets, and untracked content needed to apply the shared relevant-untracked classification rules against the Task Contract. Classify every non-ignored untracked path, record a short contract-based reason for each exclusion, and always exclude `.engineering-lens/change-review-context.md` from evaluated scope. Do not ask for confirmation.
 8. Derive faithful, concise values for `Goal`, `Intentionally excluded`, `Completion criteria`, and `Risks and external constraints` from the Task Contract. When the boundary is expressed as a clearly bounded scope, describe that boundary in `Intentionally excluded`. If risks and external constraints are omitted, record `None declared` (or its Polish equivalent) in that context section and keep their machine state `missing`; this does not assert that no risks exist. Preserve explicit constraints and do not invent intent, exclusions, criteria, or risks from the implementation diff.
-9. Calculate the shared deterministic uncommitted fingerprint. Then continue at section 5 and use its single format-version-1 schema.
+9. Continue at section 5; the helper computes and saves the snapshot with the contract.
 
 If any required fact, language choice, Git boundary, path classification, derived context value, or fingerprint cannot be established safely and unambiguously, emit the matching `rejected` automation result plus a concise error in the Task Contract's language when that language is clear, otherwise in English. Do not ask a question, do not wait, do not switch to the interactive path, and do not create or replace the context file.
 
 ## 5. Save only the context file
 
-Create `.engineering-lens/` if needed and create or replace only `.engineering-lens/change-review-context.md`. Do not modify another path. Use this schema and write `Not applicable` for inapplicable stable fields:
+Run the [review snapshot helper](../../../references/review-snapshot.md) `create` command with the selected language, stage, scope inputs, untracked classification and these concise intent fields:
 
-```markdown
-# Change Review Context
+- `Goal`: the intended outcome and why it matters.
+- `Intentionally excluded`: declared exclusions or the explicitly bounded scope.
+- `Completion criteria`: observable conditions for completion.
+- `Risks and external constraints`: only supplied risks and constraints, or `None declared` in the selected language.
 
-- Format version: 1
-- Language: English | Polish
-- Review stage: WIP | Pre-commit | Pre-merge
-- Repository root: <canonical absolute path>
-- Scope mode: uncommitted | last-commit | branch | pull-request
-- Baseline kind: commit | empty-tree
-- Baseline commit: <full SHA or Not applicable>
-- Target commit: <full SHA or Not applicable>
-- Base ref: <entered ref or Not applicable>
-- Base ref commit: <full SHA or Not applicable>
-- Merge-base commit: <full SHA or Not applicable>
-- Pull request: <identifier or Not applicable>
-- Snapshot fingerprint algorithm: <algorithm or Not applicable>
-- Snapshot fingerprint: <value or Not applicable>
-
-## Scope paths
-
-### Staged
-
-- <path or None>
-
-### Unstaged
-
-- <path or None>
-
-### Included relevant untracked
-
-- <path or None>
-
-### Excluded untracked
-
-- <path — reason or None>
-
-## Goal
-
-<what should change and why>
-
-## Intentionally excluded
-
-<explicit exclusions or None declared>
-
-## Completion criteria
-
-- <observable criterion>
-
-## Risks and external constraints
-
-- <risk or constraint, or None declared>
-```
-
-For committed modes, keep the path subsections but use `None`; the consuming review reconstructs paths from the frozen commits. Use full 40-character SHAs.
+The helper writes the existing format-version-1 context to `.engineering-lens/change-review-context.md`. Do not write or amend the file yourself. Report success only after the command succeeds. In automation, map a helper rejection to `BOUNDARY_UNRESOLVED` and leave any previous context untouched.
 
 After writing, tell the user that the context is ready and that the explicitly invoked `change-review` skill will use its saved language, stage, intent, and exact scope. In automation mode, emit `success` / `CONTEXT_CREATED` with `goal_reason`, `intentional_exclusions`, and `completion_criteria` set to `derived`, and `risks_external_constraints` set to `derived` when explicit or `missing` when omitted. Retain a concise human completion message and do not ask a follow-up question. Follow the automation result contract for transport formatting.
 

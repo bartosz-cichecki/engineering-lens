@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from urllib.parse import quote
+from test_review_snapshot import init_repo, request, s, git
 
 ROOT = Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location('automation', ROOT / 'scripts/automation.py')
@@ -208,6 +209,16 @@ class ResultTests(unittest.TestCase):
 
 
 class RunnerTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        init_repo(self.root)
+        s.create(self.root, request())
+        cwd = patch.object(a.Path, 'cwd', return_value=self.root)
+        cwd.start()
+        self.addCleanup(cwd.stop)
+
     def test_timeout_and_launch_failure_no_retry(self):
         for error in (FileNotFoundError('secret'), subprocess.TimeoutExpired('claude', 1)):
             with patch.object(a.subprocess, 'run', side_effect=error) as run:
@@ -220,6 +231,9 @@ class RunnerTests(unittest.TestCase):
         # Real subprocess boundary with a deterministic fake CLI; no LLM calls.
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
+            init_repo(directory)
+            (directory / '.git/info/exclude').write_text('*\n')
+            s.create(directory, request())
             fake = directory / 'claude'
             fake.write_text('''#!/usr/bin/env python3
 import json, os, pathlib, sys
@@ -270,6 +284,9 @@ sys.exit(int(os.environ.get('FAKE_EXIT', '0')))
     def test_orchestrator_options_and_credentials_across_real_process_boundary(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
+            init_repo(directory)
+            (directory / '.git/info/exclude').write_text('*\n')
+            s.create(directory, request())
             fake = directory / 'claude'
             fake.write_text('''#!/usr/bin/env python3
 import json, os, pathlib, sys
@@ -387,31 +404,15 @@ sys.exit(int(os.environ['FAKE_EXIT']))
         with tempfile.TemporaryDirectory() as tmp, patch.object(a.Path, 'cwd', return_value=Path(tmp)):
             path = Path(tmp) / '.engineering-lens/change-review-context.md'
             path.parent.mkdir()
-            # Instantiate the existing documented context format, including all metadata.
-            workflow = (ROOT / 'skills/change-review-context/references/workflow.md').read_text()
-            fixture = workflow.split('```markdown\n', 1)[1].split('```', 1)[0]
-            replacements = {
-                'English | Polish': 'English', 'WIP | Pre-commit | Pre-merge': 'Pre-commit',
-                '<canonical absolute path>': str(Path(tmp).resolve()),
-                'uncommitted | last-commit | branch | pull-request': 'uncommitted',
-                'commit | empty-tree': 'commit', '<full SHA or Not applicable>': 'Not applicable',
-                '<entered ref or Not applicable>': 'Not applicable', '<identifier or Not applicable>': 'Not applicable',
-                '<algorithm or Not applicable>': 'sha256; ordered baseline, staged, unstaged, untracked',
-                '<value or Not applicable>': 'a' * 64, '<path or None>': 'example.py',
-                '<path — reason or None>': 'None', '<what should change and why>': 'Add validation to reject invalid results.',
-                '<observable criterion>': 'Invalid results fail and valid results are accepted.',
-            }
-            for old, new in replacements.items():
-                fixture = fixture.replace(old, new)
-            fixture = fixture.replace('- Baseline commit: Not applicable', '- Baseline commit: ' + 'b' * 40)
+            init_repo(Path(tmp))
 
             def save(*args, **kwargs):
                 self.assertEqual(kwargs['input'], '/engineering-lens:change-review-context --automation\n\n' + contract)
                 argv = args[0]
                 self.assertEqual(json.loads(argv[argv.index('--json-schema') + 1]), a.OUTPUT_SCHEMA)
-                content = fixture.replace('<risk or constraint, or None declared>', saved_risks)
-                content = content.replace('<explicit exclusions or None declared>', boundary.partition(': ')[2].strip())
-                path.write_text(content)
+                intent = dict(zip(s.INTENT, [goal.strip(), boundary.partition(': ')[2].strip(),
+                                             criteria.strip(), saved_risks]))
+                s.create(Path(tmp), request(intent=intent))
                 return subprocess.CompletedProcess([], 0, envelope(expected), '')
 
             # Model assessment is stubbed; exercise the runner with realistic input
@@ -435,7 +436,7 @@ sys.exit(int(os.environ['FAKE_EXIT']))
                     self.assertEqual(result['reason_code'], 'CONTEXT_CREATED')
                     self.assertIsNotNone(report)
                     self.assertEqual(call.call_count, 1)
-                    self.assertIn('## Risks and external constraints\n\n- ' + saved_risks, path.read_text())
+                    self.assertIn('## Risks and external constraints\n\n' + saved_risks, path.read_text())
             before = path.read_bytes()
             rejected = context(dict.fromkeys(a.FIELDS, 'missing'), 'TASK_CONTRACT_INCOMPLETE')
             with patch.object(a.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, envelope(rejected), '')):
@@ -445,6 +446,43 @@ sys.exit(int(os.environ['FAKE_EXIT']))
             with patch.object(a.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, envelope(context()), '')):
                 result, _ = a.run('change-review-context', 'contract', 1)
                 self.assertEqual(result['status'], 'contract_error')  # stale file is not proof of success
+
+    def test_review_preflight_rejects_stale_or_missing_context_without_calling_model(self):
+        (self.root / 'code.py').write_text('drift')
+        with patch.object(a.subprocess, 'run') as call:
+            result, _ = a.run('change-review', '', 1)
+            self.assertEqual(result['reason_code'], 'CONTEXT_STALE')
+            self.assertIsNone(result['verdict'])
+            call.assert_not_called()
+        (self.root / s.CONTEXT).unlink()
+        with patch.object(a.subprocess, 'run') as call:
+            result, _ = a.run('change-review', '', 1)
+            self.assertEqual(result['reason_code'], 'CONTEXT_INVALID')
+            call.assert_not_called()
+
+    def test_review_cannot_return_verdict_after_snapshot_or_contract_drift(self):
+        for mutate_contract in (False, True):
+            s.create(self.root, request())
+            def drift(*args, **kwargs):
+                path = self.root / (s.CONTEXT if mutate_contract else 'code.py')
+                path.write_text(path.read_text() + 'changed')
+                return subprocess.CompletedProcess([], 0, envelope(review(), 'Obsolete READY report'), '')
+            with self.subTest(contract=mutate_contract), patch.object(a.subprocess, 'run', side_effect=drift):
+                result, report = a.run('change-review', '', 1)
+                self.assertEqual(result['reason_code'], 'CONTEXT_STALE')
+                self.assertIsNone(result['verdict'])
+                self.assertNotIn('Obsolete READY report', report)
+                a.validate_result(result, 'change-review')
+
+    def test_model_context_success_with_invented_fingerprint_is_rejected(self):
+        def save(*args, **kwargs):
+            path = self.root / s.CONTEXT
+            path.write_text(path.read_text().replace(s.ALGORITHM, 'invented-algorithm'))
+            return subprocess.CompletedProcess([], 0, envelope(context()), '')
+        with patch.object(a.subprocess, 'run', side_effect=save):
+            result, _ = a.run('change-review-context', 'contract', 1)
+            self.assertEqual(result['status'], 'contract_error')
+            a.validate_result(result, 'change-review-context')
 
     def test_rejection_after_write_is_contract_error(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(a.Path, 'cwd', return_value=Path(tmp)):

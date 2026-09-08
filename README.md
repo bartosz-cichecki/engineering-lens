@@ -1,6 +1,6 @@
 # Engineering Lens
 
-Cross-platform engineering workflows for explaining changes, reviewing change readiness, and assessing repositories in Codex and Claude Code.
+Engineering Lens provides context and scope control for AI engineering reviews in Codex and Claude Code. `change-review-context` saves the contract — Goal / Excluded / DONE / Risks — and freezes an exact Git snapshot; `change-review` evaluates that snapshot against the contract and the selected work stage. Code creates and verifies the snapshot, while the host model performs the review. The value is a controlled review context and scope, not a proprietary or “better” code-review model.
 
 ## Skills
 
