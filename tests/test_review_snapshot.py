@@ -1,4 +1,6 @@
 import json
+import os
+import pwd
 from pathlib import Path
 import subprocess
 import sys
@@ -42,6 +44,56 @@ class SnapshotTests(unittest.TestCase):
 
     def create(self, **changes):
         return s.create(self.root, request(**changes))
+
+    def test_only_explicit_safe_directories_survive_git_environment(self):
+        self.create()
+        baseline = s.head(self.root)
+        hostile = {
+            'GIT_DIR': '/nonexistent', 'GIT_WORK_TREE': '/nonexistent',
+            'GIT_INDEX_FILE': '/nonexistent', 'GIT_OBJECT_DIRECTORY': '/nonexistent',
+            'GIT_ALTERNATE_OBJECT_DIRECTORIES': '/nonexistent',
+            'GIT_CONFIG': '/nonexistent', 'GIT_CONFIG_PARAMETERS': "'core.bare=true'",
+            'GIT_CONFIG_GLOBAL': '/nonexistent', 'GIT_CONFIG_SYSTEM': '/nonexistent',
+            'GIT_CONFIG_COUNT': '7',
+            'GIT_CONFIG_KEY_0': 'core.bare', 'GIT_CONFIG_VALUE_0': 'true',
+            'GIT_CONFIG_KEY_1': 'safe.directory', 'GIT_CONFIG_VALUE_1': str(self.root),
+            'GIT_CONFIG_KEY_2': 'safe.directory', 'GIT_CONFIG_VALUE_2': '*',
+            'GIT_CONFIG_KEY_3': 'safe.directory', 'GIT_CONFIG_VALUE_3': '/tmp/*',
+            'GIT_CONFIG_KEY_4': 'safe.directory', 'GIT_CONFIG_VALUE_4': '.',
+            'GIT_CONFIG_KEY_5': 'include.path', 'GIT_CONFIG_VALUE_5': '/nonexistent',
+            'GIT_CONFIG_KEY_6': 'core.fsmonitor', 'GIT_CONFIG_VALUE_6': 'false',
+        }
+        with patch.dict(os.environ, hostile):
+            self.assertEqual(s.verify(self.root)['Baseline commit'], baseline)
+            with patch.object(s, 'git_run', wraps=s.git_run) as calls:
+                s.git(self.root, 'status', '--porcelain')
+            config = {k: v for k, v in calls.call_args.kwargs['env'].items() if k.startswith('GIT_')}
+        self.assertEqual(config, {
+            'GIT_CONFIG_COUNT': '1', 'GIT_CONFIG_KEY_0': 'safe.directory',
+            'GIT_CONFIG_VALUE_0': str(self.root), 'GIT_OPTIONAL_LOCKS': '0',
+            'GIT_NO_REPLACE_OBJECTS': '1', 'GIT_NO_LAZY_FETCH': '1',
+        })
+
+    @unittest.skipUnless(os.geteuid() == 0, 'requires root and an ubuntu reviewer (run in a disposable worker)')
+    def test_root_owned_read_only_repository_with_command_scoped_safe_directory(self):
+        reviewer = pwd.getpwnam('ubuntu')
+        self.assertNotEqual(reviewer.pw_uid, 0)
+        self.create()
+        for path in [self.root, *self.root.rglob('*')]:
+            path.chmod((path.stat().st_mode & 0o555) | (0o555 if path.is_dir() else 0o444))
+        self.addCleanup(lambda: [p.chmod(0o755) for p in [self.root, *self.root.rglob('*')] if p.is_dir()])
+        base = ['runuser', '-u', 'ubuntu', '--', 'env', '-i',
+                'PATH=/usr/bin:/bin', 'HOME=/nonexistent']
+        raw = subprocess.run([*base, 'git', '-C', str(self.root), 'status'], capture_output=True)
+        self.assertNotEqual(raw.returncode, 0)
+        self.assertIn(b'dubious ownership', raw.stderr)
+        helper = ['python3', str(ROOT / 'scripts/review_snapshot.py'), 'verify', '--repo', str(self.root)]
+        rejected = subprocess.run([*base, *helper], capture_output=True, text=True)
+        self.assertEqual(json.loads(rejected.stdout)['reason_code'], 'BOUNDARY_UNRESOLVED')
+        verified = subprocess.run([*base, 'GIT_CONFIG_COUNT=1', 'GIT_CONFIG_KEY_0=safe.directory',
+                                   'GIT_CONFIG_VALUE_0=' + str(self.root), *helper], capture_output=True, text=True)
+        self.assertEqual(verified.returncode, 0, verified.stdout + verified.stderr)
+        self.assertEqual(json.loads(verified.stdout)['status'], 'success')
 
     def stale(self):
         with self.assertRaises(s.SnapshotError) as raised:

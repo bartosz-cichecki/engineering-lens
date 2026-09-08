@@ -35,6 +35,24 @@ def git(root, *args, optional=False):
     # Do not refresh the index, invoke a configured filesystem monitor, or inherit
     # an alternate repository/index from the caller's environment.
     env = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
+    # Review may deliberately run as a different user on a read-only worktree.
+    # Retain only explicit, canonical directories from command-scoped config;
+    # never forward arbitrary Git configuration or wildcard trust.
+    count = os.environ.get('GIT_CONFIG_COUNT', '')
+    directories = []
+    if count.isascii() and count.isdecimal() and len(count) < 7 and int(count) <= len(os.environ):
+        for i in range(int(count)):
+            key = os.environ.get(f'GIT_CONFIG_KEY_{i}', '')
+            value = os.environ.get(f'GIT_CONFIG_VALUE_{i}', '')
+            if (key.lower() == 'safe.directory' and os.path.isabs(value)
+                    and not any(c in value for c in '*?[\r\n\x00')
+                    and str(Path(value).resolve()) == value):
+                directories.append(value)
+    if directories:
+        env['GIT_CONFIG_COUNT'] = str(len(directories))
+        for i, directory in enumerate(directories):
+            env[f'GIT_CONFIG_KEY_{i}'] = 'safe.directory'
+            env[f'GIT_CONFIG_VALUE_{i}'] = directory
     env.update(GIT_OPTIONAL_LOCKS='0', GIT_NO_REPLACE_OBJECTS='1', GIT_NO_LAZY_FETCH='1', LC_ALL='C')
     result = git_run(['git', '-c', 'core.fsmonitor=false', '-C', str(root), *args],
                      capture_output=True, env=env)
