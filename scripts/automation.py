@@ -10,6 +10,12 @@ import subprocess
 import sys
 from urllib.parse import quote, quote_plus
 
+# Keep helper imports read-only even when reviewing this plugin checkout.
+sys.dont_write_bytecode = True
+# Also support importing the runner by file path in embedding/test environments.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from review_snapshot import verify as verify_context, SnapshotError
+
 ROOT = Path(__file__).resolve().parent.parent
 SCHEMA = json.loads((ROOT / 'references/automation-result-v1.schema.json').read_text())
 OUTPUT_SCHEMA = {
@@ -140,48 +146,9 @@ def check_context(path, before):
     after = context_snapshot(path)
     if after is None or after == before or path.is_symlink():
         raise ValueError('Context was not saved')
-    content = after[2].decode('utf-8')
-    required = ['# Change Review Context', '- Format version: 1',
-                '- Scope mode: uncommitted', '- Review stage: Pre-commit',
-                f'- Repository root: {Path.cwd().resolve()}',
-                '## Scope paths', '### Staged', '### Unstaged',
-                '### Included relevant untracked', '### Excluded untracked',
-                '## Goal', '## Intentionally excluded', '## Completion criteria',
-                '## Risks and external constraints']
-    lines = content.splitlines()
-    if any(lines.count(line) != 1 for line in required):
-        raise ValueError('Invalid context artifact')
-    metadata = {}
-    for line in content.split('## Scope paths', 1)[0].splitlines():
-        if line.startswith('- '):
-            key, separator, value = line[2:].partition(': ')
-            if not separator or not value.strip() or key in metadata:
-                raise ValueError('Invalid metadata')
-            metadata[key] = value
-    expected = {'Format version', 'Language', 'Review stage', 'Repository root',
-                'Scope mode', 'Baseline kind', 'Baseline commit', 'Target commit',
-                'Base ref', 'Base ref commit', 'Merge-base commit', 'Pull request',
-                'Snapshot fingerprint algorithm', 'Snapshot fingerprint'}
-    if set(metadata) != expected or metadata['Language'] not in ('English', 'Polish'):
-        raise ValueError('Invalid metadata fields')
-    if metadata['Baseline kind'] not in ('commit', 'empty-tree'):
-        raise ValueError('Invalid baseline kind')
-    if metadata['Baseline kind'] == 'commit':
-        if not re.fullmatch('[0-9a-f]{40}', metadata['Baseline commit']):
-            raise ValueError('Invalid baseline')
-    elif metadata['Baseline commit'] != 'Not applicable':
-        raise ValueError('Invalid empty baseline')
-    for key in ('Target commit', 'Base ref', 'Base ref commit', 'Merge-base commit', 'Pull request'):
-        if metadata[key] != 'Not applicable':
-            raise ValueError('Unexpected committed boundary')
-    for key in ('Snapshot fingerprint algorithm', 'Snapshot fingerprint'):
-        if metadata[key] == 'Not applicable' or '<' in metadata[key]:
-            raise ValueError('Missing fingerprint')
-    for heading in required[6:]:
-        section = content.split(heading + '\n', 1)[1]
-        body = re.split(r'(?m)^#{2,3} ', section, maxsplit=1)[0].strip()
-        if heading != '## Scope paths' and (not body or re.search(r'<[^>]+>', body)):
-            raise ValueError('Empty or placeholder context section')
+    metadata = verify_context(Path.cwd())
+    if metadata['Scope mode'] != 'uncommitted' or metadata['Review stage'] != 'Pre-commit':
+        raise ValueError('Invalid automation scope or stage')
 
 
 SENSITIVE_NAME = re.compile(r'token|secret|password|passwd|credential|api.?key|access.?key|private.?key|auth|cookie', re.I)
@@ -289,7 +256,13 @@ def run(operation, contract, timeout, *, options=None, diagnostics=None):
     try:
         if operation == 'change-review-context' and (path.is_symlink() or path.parent.is_symlink()):
             return failure(operation, 'contract_error', 'AUTOMATION_RESULT_INVALID'), 'Context path is a symlink.'
-        before = context_snapshot(path) if operation == 'change-review-context' else None
+        if operation == 'change-review':
+            try:
+                verify_context(Path.cwd())
+            except (SnapshotError, OSError, UnicodeError, ValueError, TypeError) as exc:
+                reason = getattr(exc, 'reason', 'CONTEXT_INVALID')
+                return failure(operation, 'rejected', reason), MESSAGES[reason]
+        before = context_snapshot(path)
         instructions = (ROOT / 'references/automation-result.md').read_text()
         instructions += '\nAUTOMATION TRANSPORT ACTIVE. Submit automation_result and human_report '
         instructions += 'through the CLI schema-constrained structured output. '
@@ -306,12 +279,21 @@ def run(operation, contract, timeout, *, options=None, diagnostics=None):
         )
         result, report = decode_cli(completed.stdout, completed.returncode, operation)
         artifact_error = None
+        if operation == 'change-review' and result['status'] == 'success':
+            try:
+                if context_snapshot(path) != before:
+                    raise SnapshotError('CONTEXT_STALE', 'Context changed during review.')
+                verify_context(Path.cwd())
+            except (SnapshotError, OSError, UnicodeError, ValueError, TypeError) as exc:
+                reason = getattr(exc, 'reason', 'CONTEXT_INVALID')
+                result = failure(operation, 'rejected', reason)
+                report = MESSAGES[reason]
         if operation == 'change-review-context' and result['status'] == 'rejected' and context_snapshot(path) != before:
             artifact_error = 'Context changed during semantic rejection.'
         if result['status'] == 'success' and operation == 'change-review-context':
             try:
                 check_context(path, before)
-            except (OSError, UnicodeError, ValueError):
+            except (OSError, UnicodeError, ValueError, TypeError):
                 artifact_error = 'Context artifact was not saved correctly.'
         if artifact_error:
             result = failure(operation, 'contract_error', 'AUTOMATION_RESULT_INVALID')
